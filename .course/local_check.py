@@ -32,32 +32,27 @@ PATH_POLICY = {
     "train: produce reproducible checkpoint": {"artifacts/model.ckpt"},
 }
 
-PROTECTED_PATHS = [
-    "README.md",
-    "PROJECT_SPEC.md",
-    ".gitignore",
-    ".condarc",
-    "environment.yml",
-    "conda-linux-64.lock",
-    "pyproject.toml",
-    "CMakePresets.json",
-    "cpp/include/fastops.h",
-    "hybridml/environment.py",
-    "hybridml/model.py",
-    "hybridml/checkpoint.py",
-    "hybridml/fingerprint.py",
-    "scripts/doctor.sh",
-    "scripts/build.sh",
-    "scripts/train.sh",
-    "scripts/check.sh",
-    "tests/public/test_environment.py",
-    "tests/public/test_native.py",
-    "tests/public/test_checkpoint_schema.py",
-    ".course/local_check.py",
-    ".course/protected_paths.txt",
-    ".course/assignment_contract.json",
-    "bootstrap.sh",
-]
+PROTECTED_PATHS_FILE = Path(".course/protected_paths.txt")
+
+
+def load_path_list(path: Path) -> list[str]:
+    result: list[str] = []
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+
+        if not line:
+            continue
+
+        if line.startswith("#"):
+            continue
+
+        result.append(line)
+
+    return result
+
+
+PROTECTED_PATHS = load_path_list(PROTECTED_PATHS_FILE)
 
 ALLOWED_FROM_START = set().union(*PATH_POLICY.values())
 
@@ -90,6 +85,7 @@ def changed_after_start() -> set[str]:
 
 
 def preflight() -> None:
+    validate_protected_manifest()
     missing = []
     for ref in (BASE, START, NATIVE_TIP, TRAINING_TIP, BAD_COMMIT, RECOVERY, IMMUTABLE):
         result = subprocess.run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -102,11 +98,39 @@ def preflight() -> None:
 def native_contract() -> None:
     cmake = Path("CMakeLists.txt").read_text(encoding="utf-8")
     cpp = Path("cpp/src/fastops.cpp").read_text(encoding="utf-8")
+    native_py = Path("hybridml/native.py").read_text(encoding="utf-8")
     require("Eigen3::Eigen" in cmake, "The final CMake target must link Eigen3::Eigen.")
     require("FASTOPS_ENABLE_DIAGNOSTICS=1" in cmake, "The native diagnostics compile definition is missing.")
     require("standardize_features" in cpp, "The plural exported native symbol is missing.")
     require("!std::isfinite(epsilon)" in cpp, "The non-finite epsilon validation is missing.")
+    require('"libfastops.so"' in native_py, "The Python loader must use build/libfastops.so.")
     print("native contract passed")
+
+
+def validate_protected_manifest() -> None:
+    duplicate_paths = {
+        path
+        for path in PROTECTED_PATHS
+        if PROTECTED_PATHS.count(path) > 1
+    }
+
+    require(
+        not duplicate_paths,
+        "Duplicate protected paths: "
+        + ", ".join(sorted(duplicate_paths)),
+    )
+
+    missing = [
+        path
+        for path in PROTECTED_PATHS
+        if not Path(path).exists()
+    ]
+
+    require(
+        not missing,
+        "Protected-path manifest references missing files:\n"
+        + "\n".join(missing),
+    )
 
 
 def hygiene() -> None:
@@ -153,6 +177,7 @@ def hygiene() -> None:
 
 
 def protected_paths() -> None:
+    validate_protected_manifest()
     for path in PROTECTED_PATHS:
         result = subprocess.run(["git", "diff", "--no-ext-diff", "--no-renames", "--exit-code", IMMUTABLE, "HEAD", "--", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         require(result.returncode == 0, f"Protected path changed: {path}")
@@ -176,7 +201,15 @@ def history() -> None:
         parent = f"{commit}^1"
         changed = diff_names(parent, commit)
         allowed = PATH_POLICY[subject]
-        require(changed <= allowed, f"{subject} changed unexpected paths: {sorted(changed - allowed)}")
+        require(changed, f"{subject} is empty.")
+        require(
+            changed == allowed,
+            (
+                f"{subject} changed the wrong paths.\n"
+                f"Expected: {sorted(allowed)}\n"
+                f"Actual: {sorted(changed)}"
+            ),
+        )
         protected_touched = changed & set(PROTECTED_PATHS)
         require(not protected_touched, f"{subject} touched protected paths: {sorted(protected_touched)}")
         if index > 0:

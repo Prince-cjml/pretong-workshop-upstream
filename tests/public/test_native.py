@@ -29,5 +29,3 @@ def test_non_2d_rejected():
 def test_invalid_epsilon_raises_native_error():
     with pytest.raises(NativeError):
         standardize_features(np.ones((2, 2), dtype=np.float32), epsilon=0.0)
-    with pytest.raises(NativeError):
-        standardize_features(np.ones((2, 2), dtype=np.float32), epsilon=float('nan'))

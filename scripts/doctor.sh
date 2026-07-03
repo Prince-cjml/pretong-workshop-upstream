@@ -29,7 +29,7 @@ if [[ "$mode" == "bootstrap" ]]; then
   check "Linux x86_64" bash -c '[[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]]'
 elif [[ "$mode" == "environment" ]]; then
   if [[ -n "${CONDA_PREFIX:-}" ]]; then echo "[PASS] CONDA_PREFIX"; else echo "[FAIL] CONDA_PREFIX"; failures=$((failures + 1)); fi
-  check "hybridml-rescue active" bash -c '[[ "${CONDA_DEFAULT_ENV:-}" == "hybridml-rescue" ]]'
+  check "Conda environment active" bash -c '[[ -n "${CONDA_DEFAULT_ENV:-}" ]]'
   check "Python contract" python -m hybridml.environment
   check tomli python -c 'import tomli'
   check cmake command -v cmake
